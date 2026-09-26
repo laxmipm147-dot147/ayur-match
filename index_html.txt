@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Ayur-Match: Tactical</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
+body {
+background-color: #0b0c10;
+color: #c5c6c7;
+font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+height: 100vh;
+display: flex;
+flex-direction: column;
+align-items: center;
+justify-content: space-between;
+overflow: hidden;
+padding: 12px 0;
+}
+header { text-align: center; width: 100%; max-width: 380px; }
+h1 { font-size: 1.3rem; color: #66fcf1; letter-spacing: 2px; margin-bottom: 2px; }
+.hud {
+display: grid;
+grid-template-columns: repeat(4, 1fr);
+gap: 6px;
+font-size: 0.72rem;
+margin: 8px 12px;
+background: rgba(31, 40, 51, 0.9);
+padding: 8px 10px;
+border-radius: 12px;
+border: 1px solid #45a29e44;
+text-align: center;
+}
+.hud div span { display: block; color: #66fcf1; font-weight: bold; font-size: 0.88rem; }
+.board-container {
+width: min(92vw, 380px);
+aspect-ratio: 1;
+background: #1f2833;
+border-radius: 14px;
+padding: 10px;
+display: grid;
+grid-template-columns: repeat(6, 1fr);
+grid-template-rows: repeat(6, 1fr);
+gap: 6px;
+box-shadow: 0 12px 35px rgba(0,0,0,0.6), inset 0 1px 2px rgba(255,255,255,0.04);
+border: 1px solid #45a29e44;
+position: relative;
+}
+.tile {
+background: #0b0c10;
+border-radius: 8px;
+display: flex;
+align-items: center;
+justify-content: center;
+position: relative;
+cursor: pointer;
+transition: transform 0.12s ease, background-color 0.12s ease, box-shadow 0.12s ease;
+touch-action: manipulation;
+border: 1px solid rgba(255,255,255,0.04);
+overflow: hidden;
+}
+.tile.selected {
+background: #45a29e33;
+transform: scale(0.92);
+box-shadow: 0 0 14px #66fcf177;
+border: 1px solid #66fcf1;
+}
+.tile.power-line {
+border: 1px solid #66fcf1;
+box-shadow: inset 0 0 12px rgba(102, 252, 241, 0.45);
+background: rgba(102, 252, 241, 0.08);
+}
+.tile.power-square {
+border: 1px solid #ffd700;
+box-shadow: inset 0 0 12px rgba(255, 215, 0, 0.45);
+background: rgba(255, 215, 0, 0.08);
+}
+.item-icon {
+width: 100%;
+height: 100%;
+display: flex;
+align-items: center;
+justify-content: center;
+line-height: 1;
+font-size: clamp(1.3rem, 5.5vw, 1.65rem);
+pointer-events: none;
+}
+.sun-item {
+color: #ff914d;
+text-shadow: 0 0 8px rgba(255, 145, 77, 0.6);
+}
+.overlay {
+position: fixed;
+top: 0; left: 0; width: 100vw; height: 100vh;
+background: rgba(11, 12, 16, 0.94);
+display: flex;
+flex-direction: column;
+align-items: center;
+justify-content: center;
+z-index: 10;
+text-align: center;
+padding: 24px;
+display: none;
+}
+.overlay.active { display: flex; }
+.overlay h2 { font-size: 1.8rem; color: #66fcf1; margin-bottom: 12px; }
+.overlay p { margin-bottom: 20px; font-size: 0.92rem; color: #c5c6c7; line-height: 1.4; }
+.button-group { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 240px; }
+.overlay button {
+background: #66fcf1;
+color: #0b0c10;
+border: none;
+padding: 12px 28px;
+font-size: 1rem;
+font-weight: bold;
+border-radius: 24px;
+cursor: pointer;
+box-shadow: 0 4px 15px rgba(102, 252, 241, 0.3);
+}
+.overlay button.secondary {
+background: transparent;
+color: #c5c6c7;
+border: 1px solid #45a29e44;
+box-shadow: none;
+}
+footer { font-size: 0.72rem; color: #45a29e; text-align: center; padding: 0 12px; }
+</style>
+</head>
+<body>
+
+<header>
+<h1>AYUR-MATCH</h1>
+<div class="hud">
+<div>Level<span id="level">1</span></div>
+<div>Lives<span id="lives">❤️❤️❤️</span></div>
+<div>Moves<span id="moves">--</span></div>
+<div>Score<span id="target">0/140</span></div>
+</div>
+</header>
+
+<div class="board-container" id="board"></div>
+
+<footer id="statusMsg">Infinite Levels Active | Tiered Progression</footer>
+
+<div class="overlay" id="messageOverlay">
+<h2 id="overlayTitle">Tactical Clear!</h2>
+<p id="overlayText">Target reached.</p>
+<div class="button-group" id="overlayBtnGroup">
+<button onclick="handleOverlayAction()" id="overlayBtn">Next Level</button>
+</div>
+</div>
+
+<script>
+const BOARD_SIZE = 6;
+
+function getActiveSymbolCount(lvl) {
+if (lvl <= 10) return 5;
+if (lvl <= 20) return 6;
+return 7; // Unlimited levels 21+ use all 7 unique symbols
+}
+
+let board = [];
+let level = Number(localStorage.getItem('ayur_level') || 1);
+let lives = 3;
+let movesLeft = 36;
+let score = 0;
+let targetScore = 140;
+let selectedTile = null;
+let isProcessing = false;
+let gameState = 'playing';
+
+window.addEventListener('DOMContentLoaded', () => {
+if (typeof ytgame !== 'undefined' && ytgame.sdk) {
+ytgame.sdk.init().then(() => {
+ytgame.sdk.onPause(() => {
+if (audioCtx.state === 'running') audioCtx.suspend();
+if (gameState === 'playing') gameState = 'paused_yt';
+});
+ytgame.sdk.onResume(() => {
+if (audioCtx.state === 'suspended') audioCtx.resume();
+if (gameState === 'paused_yt') gameState = 'playing';
+});
+}).catch(err => console.warn('SDK init info:', err));
+}
+});
+
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function playChime(pitchMultiplier = 1) {
+if (audioCtx.state === 'suspended') audioCtx.resume();
+const now = audioCtx.currentTime;
+const osc = audioCtx.createOscillator();
+const gain = audioCtx.createGain();
+osc.frequency.setValueAtTime(300 * pitchMultiplier, now);
+osc.type = 'sine';
+gain.gain.setValueAtTime(0.1, now);
+gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+osc.connect(gain);
+gain.connect(audioCtx.destination);
+osc.start(now);
+osc.stop(now + 0.35);
+}
+
+function playBlastSound() {
+if (audioCtx.state === 'suspended') audioCtx.resume();
+const now = audioCtx.currentTime;
+const osc = audioCtx.createOscillator();
+const gain = audioCtx.createGain();
+osc.frequency.setValueAtTime(140, now);
+osc.frequency.exponentialRampToValueAtTime(40, now + 0.25);
+osc.type = 'triangle';
+gain.gain.setValueAtTime(0.18, now);
+gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+osc.connect(gain);
+gain.connect(audioCtx.destination);
+osc.start(now);
+osc.stop(now + 0.35);
+}
+
+function playFailSound() {
+if (audioCtx.state === 'suspended') audioCtx.resume();
+const now = audioCtx.currentTime;
+const osc = audioCtx.createOscillator();
+const gain = audioCtx.createGain();
+osc.frequency.setValueAtTime(130, now);
+osc.frequency.linearRampToValueAtTime(70, now + 0.4);
+osc.type = 'sawtooth';
+gain.gain.setValueAtTime(0.15, now);
+gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+osc.connect(gain);
+gain.connect(audioCtx.destination);
+osc.start(now);
+osc.stop(now + 0.45);
+}
+
+function updateHUD() {
+document.getElementById('level').textContent = level;
+document.getElementById('lives').textContent = '❤️'.repeat(lives) || '💔';
+document.getElementById('moves').textContent = movesLeft;
+document.getElementById('target').textContent = ${score}/${targetScore};
+
+const tierLabel = level <= 10 ? 'Tier 1-10 (5 symbols)' : level <= 20 ? 'Tier 11-20 (6 symbols)' : Tier 21+ [Lvl ${level}] (7 symbols); document.getElementById('statusMsg').textContent = ``${tierLabel} | Random Target (140-200) & Moves;
+}
+
+function initLevel() {
+score = 0;
+targetScore = Math.floor(Math.random() * (200 - 140 + 1)) + 140;
+movesLeft = Math.floor(Math.random() * 7) + 36;
+localStorage.setItem('ayur_level', level);
+
+const symCount = getActiveSymbolCount(level);
+do {
+board = Array(BOARD_SIZE).fill(null).map(() =>
+Array(BOARD_SIZE).fill(0).map(() => ({ val: Math.floor(Math.random() * symCount), power: 0 }))
+);
+} while (findImmediateMatches().matchedCells.length > 0 || !hasPossibleMoves());
+
+selectedTile = null;
+isProcessing = false;
+gameState = 'playing';
+updateHUD();
+renderBoard();
+document.getElementById('messageOverlay').classList.remove('active');
+}
+
+function renderItemHTML(val, power) {
+if (power === 1) return <span class="item-icon"&gt;⚡&lt;/span>;
+if (power === 2) return <span class="item-icon"&gt;🧺&lt;/span>;
+switch (val) {
+case 0: return <span class="item-icon"&gt;🌿&lt;/span>;
+case 1: return <span class="item-icon"&gt;💧&lt;/span>;
+case 2: return <span class="item-icon sun-item"&gt;☀️&lt;/span>;
+case 3: return <span class="item-icon"&gt;🪷&lt;/span>;
+case 4: return <span class="item-icon"&gt;🧄&lt;/span>;
+case 5: return <span class="item-icon"&gt;🫚&lt;/span>;
+case 6: return <span class="item-icon"&gt;🥣&lt;/span>;
+default: return '';
+}
+}
+
+function renderBoard() {
+const container = document.getElementById('board');
+container.innerHTML = '';
+for (let r = 0; r < BOARD_SIZE; r++) {
+for (let c = 0; c < BOARD_SIZE; c++) {
+const tileEl = document.createElement('div');
+tileEl.className = 'tile';
+const cell = board[r][c];
+if (cell && (cell.val !== null || cell.power > 0)) {
+if (cell.power === 1) tileEl.classList.add('power-line');
+if (cell.power === 2) tileEl.classList.add('power-square');
+tileEl.innerHTML = renderItemHTML(cell.val, cell.power);
+}
+if (selectedTile && selectedTile.r === r && selectedTile.c === c) {
+tileEl.classList.add('selected');
+}
+tileEl.addEventListener('click', () => handleTileClick(r, c));
+container.appendChild(tileEl);
+}
+}
+}
+
+function handleTileClick(r, c) {
+if (isProcessing || gameState !== 'playing' || !board[r][c] || (board[r][c].val === null && board[r][c].power === 0)) return;
+
+if (!selectedTile) {
+selectedTile = { r, c };
+renderBoard();
+return;
+}
+
+if (selectedTile.r === r && selectedTile.c === c) {
+selectedTile = null;
+renderBoard();
+return;
+}
+
+const dist = Math.abs(selectedTile.r - r) + Math.abs(selectedTile.c - c);
+if (dist === 1) {
+const r1 = selectedTile.r, c1 = selectedTile.c;
+selectedTile = null;
+movesLeft--;
+executeSwapAndResolve(r1, c1, r, c);
+} else {
+selectedTile = { r, c };
+renderBoard();
+}
+}
+
+async function executeSwapAndResolve(r1, c1, r2, c2) {
+isProcessing = true;
+swapCells(r1, c1, r2, c2);
+updateHUD();
+
+const c1Cell = board[r1][c1];
+const c2Cell = board[r2][c2];
+
+let powerTriggered = false;
+if (c1Cell && c1Cell.power > 0) {
+await triggerPowerUp(r1, c1, c1Cell.power);
+powerTriggered = true;
+} else if (c2Cell && c2Cell.power > 0) {
+await triggerPowerUp(r2, c2, c2Cell.power);
+powerTriggered = true;
+}
+
+const initialMatchCheck = findImmediateMatches();
+
+if (!powerTriggered && initialMatchCheck.matchedCells.length === 0) {
+await new Promise(res => setTimeout(res, 200));
+swapCells(r1, c1, r2, c2);
+renderBoard();
+} else {
+if (powerTriggered) {
+await applyGravityAndFill();
+}
+await resolveCascade();
+}
+
+isProcessing = false;
+checkGameState();
+}
+
+function swapCells(r1, c1, r2, c2) {
+const temp = board[r1][c1];
+board[r1][c1] = board[r2][c2];
+board[r2][c2] = temp;
+renderBoard();
+}
+
+function swapCellsMock(r1, c1, r2, c2) {
+const temp = board[r1][c1];
+board[r1][c1] = board[r2][c2];
+board[r2][c2] = temp;
+}
+
+function hasPossibleMoves() {
+for (let r = 0; r < BOARD_SIZE; r++) {
+for (let c = 0; c < BOARD_SIZE; c++) {
+const neighbors = [];
+if (c < BOARD_SIZE - 1) neighbors.push([r, c + 1]);
+if (r < BOARD_SIZE - 1) neighbors.push([r + 1, c]);
+
+for (const [nr, nc] of neighbors) {
+if ((board[r][c] && board[r][c].power > 0) || (board[nr][nc] && board[nr][nc].power > 0)) {
+return true;
+}
+swapCellsMock(r, c, nr, nc);
+const hasMatch = findImmediateMatches().matchedCells.length > 0;
+swapCellsMock(r, c, nr, nc);
+if (hasMatch) return true;
+}
+}
+}
+return false;
+}
+
+function findImmediateMatches() {
+const matchedCells = new Set();
+const colorGroups = {};
+
+for (let r = 0; r < BOARD_SIZE; r++) {
+let matchLen = 1;
+for (let c = 1; c < BOARD_SIZE; c++) {
+const prev = board[r][c-1];
+const curr = board[r][c];
+if (curr && curr.val !== null && curr.power === 0 &&
+prev && prev.val !== null && prev.power === 0 &&
+curr.val === prev.val) {
+matchLen++;
+} else {
+if (matchLen >= 3) {
+const color = board[r][c-1].val;
+if (!colorGroups[color]) colorGroups[color] = new Set();
+for (let k = 0; k < matchLen; k++) {
+const coord = ${r},${c-1-k};
+matchedCells.add(coord);
+colorGroups[color].add(coord);
+}
+}
+matchLen = 1;
+}
+}
+if (matchLen >= 3) {
+const color = board[r][BOARD_SIZE-1].val;
+if (!colorGroups[color]) colorGroups[color] = new Set();
+for (let k = 0; k < matchLen; k++) {
+const coord = ${r},${BOARD_SIZE-1-k};
+matchedCells.add(coord);
+colorGroups[color].add(coord);
+}
+}
+}
+
+for (let c = 0; c < BOARD_SIZE; c++) {
+let matchLen = 1;
+for (let r = 1; r < BOARD_SIZE; r++) {
+const prev = board[r-1][c];
+const curr = board[r][c];
+if (curr && curr.val !== null && curr.power === 0 &&
+prev && prev.val !== null && prev.power === 0 &&
+curr.val === prev.val) {
+matchLen++;
+} else {
+if (matchLen >= 3) {
+const color = board[r-1][c].val;
+if (!colorGroups[color]) colorGroups[color] = new Set();
+for (let k = 0; k < matchLen; k++) {
+const coord = ${r-1-k},${c};
+matchedCells.add(coord);
+colorGroups[color].add(coord);
+}
+}
+matchLen = 1;
+}
+}
+if (matchLen >= 3) {
+const color = board[BOARD_SIZE-1][c].val;
+if (!colorGroups[color]) colorGroups[color] = new Set();
+for (let k = 0; k < matchLen; k++) {
+const coord = ${BOARD_SIZE-1-k},${c};
+matchedCells.add(coord);
+colorGroups[color].add(coord);
+}
+}
+}
+
+const specialSpawns = [];
+for (const [colorStr, coordsSet] of Object.entries(colorGroups)) {
+const coords = Array.from(coordsSet).map(s => {
+const [r, c] = s.split(',').map(Number);
+return {r, c};
+});
+if (coords.length >= 5) {
+const rows = new Set(coords.map(pt => pt.r));
+const cols = new Set(coords.map(pt => pt.c));
+const center = coords[Math.floor(coords.length / 2)];
+
+if ((rows.size === 1 || cols.size === 1) && coords.length === 5) {
+specialSpawns.push({ r: center.r, c: center.c, type: 1, val: null });
+} else if (rows.size >= 2 && cols.size >= 2) {
+specialSpawns.push({ r: center.r, c: center.c, type: 2, val: null });
+}
+}
+}
+
+return {
+matchedCells: Array.from(matchedCells).map(s => { const [r,c]=s.split(',').map(Number); return {r,c}; }),
+specialSpawns
+};
+}
+
+async function triggerPowerUp(startR, startC, startType) {
+let queue = [{ r: startR, c: startC, type: startType }];
+const processed = new Set();
+
+while (queue.length > 0) {
+const wave = [...queue];
+queue = [];
+const waveCleared = new Set();
+
+for (const curr of wave) {
+const key = ${curr.r},${curr.c};
+if (processed.has(key)) continue;
+processed.add(key);
+
+if (curr.type === 1) {
+for (let i = 0; i < BOARD_SIZE; i++) {
+waveCleared.add(${curr.r},${i});
+waveCleared.add(${i},${curr.c});
+}
+} else if (curr.type === 2) {
+for (let dr = -1; dr <= 1; dr++) {
+for (let dc = -1; dc <= 1; dc++) {
+const nr = curr.r + dr, nc = curr.c + dc;
+if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) {
+waveCleared.add(${nr},${nc});
+}
+}
+}
+}
+}
+
+waveCleared.forEach(coord => {
+const [pr, pc] = coord.split(',').map(Number);
+if (board[pr][pc] && board[pr][pc].power > 0 && !processed.has(coord)) {
+queue.push({ r: pr, c: pc, type: board[pr][pc].power });
+}
+});
+
+const list = Array.from(waveCleared).map(s => { const [r,c]=s.split(',').map(Number); return {r,c}; });
+score += list.length * 2;
+updateHUD();
+playBlastSound();
+list.forEach(({ r, c }) => { board[r][c] = null; });
+renderBoard();
+await new Promise(res => setTimeout(res, 200));
+}
+}
+
+async function resolveCascade() {
+while (true) {
+const { matchedCells, specialSpawns } = findImmediateMatches();
+if (matchedCells.length === 0 && specialSpawns.length === 0) break;
+
+playChime(1.3);
+score += matchedCells.length;
+updateHUD();
+
+matchedCells.forEach(({ r, c }) => {
+if (board[r][c] && board[r][c].power === 0) board[r][c] = null;
+});
+
+specialSpawns.forEach(sp => {
+board[sp.r][sp.c] = { val: null, power: sp.type };
+});
+
+renderBoard();
+await new Promise(res => setTimeout(res, 220));
+await applyGravityAndFill();
+}
+}
+
+async function applyGravityAndFill() {
+const symCount = getActiveSymbolCount(level);
+for (let c = 0; c < BOARD_SIZE; c++) {
+let emptyRow = BOARD_SIZE - 1;
+for (let r = BOARD_SIZE - 1; r >= 0; r--) {
+if (board[r][c] !== null && (board[r][c].val !== null || board[r][c].power > 0)) {
+board[emptyRow][c] = board[r][c];
+if (emptyRow !== r) board[r][c] = null;
+emptyRow--;
+}
+}
+for (let r = emptyRow; r >= 0; r--) {
+board[r][c] = { val: Math.floor(Math.random() * symCount), power: 0 };
+}
+}
+renderBoard();
+await new Promise(res => setTimeout(res, 220));
+}
+
+function checkGameState() {
+if (score >= targetScore) {
+gameState = 'win_overlay';
+showWinOverlay();
+} else if (movesLeft <= 0) {
+handleLifeLoss('Out of moves!');
+} else if (!hasPossibleMoves()) {
+handleLifeLoss('No valid moves left on board!');
+}
+}
+
+function handleLifeLoss(reason) {
+lives--;
+updateHUD();
+playFailSound();
+if (lives > 0) {
+gameState = 'retry_overlay';
+showRetryOverlay(${reason} (-1 Life). Lives left: ${'❤️'.repeat(lives)});
+} else {
+gameState = 'gameover_overlay';
+showGameOverOverlay(${reason} All lives exhausted.`);
+}
+}
+
+function showWinOverlay() {
+document.getElementById('overlayTitle').textContent = Level${level} Clear!; document.getElementById('overlayText').textContent =Target {level + 1} with fresh randomized goals.; const group = document.getElementById('overlayBtnGroup'); group.innerHTML =<button onclick="handleOverlayAction()">Next Level</button>`;
+document.getElementById('messageOverlay').classList.add('active');
+}
+
+function showRetryOverlay(text) {
+document.getElementById('overlayTitle').textContent = 'Level Retry';
+document.getElementById('overlayText').textContent = text;
+const group = document.getElementById('overlayBtnGroup');
+group.innerHTML = <button onclick="handleOverlayAction()"&gt;Try Level Again&lt;/button>;
+document.getElementById('messageOverlay').classList.add('active');
+}
+
+function showGameOverOverlay(text) {
+document.getElementById('overlayTitle').textContent = 'Tactical Failure';
+document.getElementById('overlayText').textContent = ${text} Watch a rewarded video to get +3 lives & continue, or restart from Level 1.;
+const group = document.getElementById('overlayBtnGroup');
+group.innerHTML = &lt;button onclick="handleWatchAdRevive()"&gt;📺 Watch Ad (+3 Lives & Continue)&lt;/button&gt; &lt;button class="secondary" onclick="handleOverlayAction()"&gt;Restart Game (Level 1)&lt;/button&gt;;
+document.getElementById('messageOverlay').classList.add('active');
+}
+
+async function handleWatchAdRevive() {
+if (typeof ytgame !== 'undefined' && ytgame.ads && ytgame.ads.requestRewardedAd) {
+try {
+await ytgame.ads.requestRewardedAd('extra-lives-revive');
+grantReviveReward();
+} catch (err) {
+console.warn('Ad skipped or unavailable:', err);
+}
+} else {
+alert('Simulated YouTube Ad watched!');
+grantReviveReward();
+}
+}
+
+function grantReviveReward() {
+lives = 3;
+if (movesLeft <= 0) {
+movesLeft = 20;
+}
+if (!hasPossibleMoves()) {
+const symCount = getActiveSymbolCount(level);
+do {
+board = Array(BOARD_SIZE).fill(null).map(() =>
+Array(BOARD_SIZE).fill(0).map(() => ({ val: Math.floor(Math.random() * symCount), power: 0 }))
+);
+} while (findImmediateMatches().matchedCells.length > 0 || !hasPossibleMoves());
+renderBoard();
+}
+gameState = 'playing';
+updateHUD();
+document.getElementById('messageOverlay').classList.remove('active');
+}
+
+function handleOverlayAction() {
+if (gameState === 'win_overlay') {
+level++;
+initLevel();
+} else if (gameState === 'retry_overlay') {
+initLevel();
+} else if (gameState === 'gameover_overlay') {
+level = 1;
+lives = 3;
+localStorage.setItem('ayur_level', 1);
+initLevel();
+}
+}
+
+initLevel();
+</script>
+</body>
+</html>
